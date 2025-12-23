@@ -44,12 +44,9 @@ resource "aws_launch_template" "main" {
     )
   }
 
-  user_data = base64encode(templatefile("${path.module}/user-data.sh.tpl", {
-    cluster_name        = var.cluster_name
-    cluster_endpoint    = aws_eks_cluster.main.endpoint
-    cluster_ca          = aws_eks_cluster.main.certificate_authority[0].data
-    bootstrap_arguments = var.bootstrap_extra_args
-  }))
+  # Note: user_data is not specified here because EKS Managed Node Groups
+  # automatically generate the appropriate user data for bootstrapping nodes.
+  # If you need custom user data, consider using self-managed node groups instead.
 
   tags = var.default_tags
 }

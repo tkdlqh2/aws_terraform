@@ -1,0 +1,48 @@
+name: Validate Kubernetes Manifests
+
+on:
+  pull_request:
+    paths:
+      - 'kubernetes/**'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Validate YAML syntax
+        run: |
+          find kubernetes -name '*.yaml' -o -name '*.yml' | while read file; do
+            echo "Validating $file"
+            kubectl apply --dry-run=client -f "$file" || exit 1
+          done
+
+      - name: Setup kubeconform
+        run: |
+          wget https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform-linux-amd64.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validate with kubeconform
+        run: |
+          find kubernetes -name '*.yaml' -o -name '*.yml' | while read file; do
+            echo "Validating $file with kubeconform"
+            kubeconform -strict "$file" || exit 1
+          done
+
+      - name: Lint with kube-linter
+        uses: stackrox/kube-linter-action@v1
+        with:
+          directory: kubernetes
+          config: .kube-linter.yaml
+        continue-on-error: true

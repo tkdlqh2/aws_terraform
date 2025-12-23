@@ -1,0 +1,37 @@
+# Staging Environment Applications
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: staging-applications
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/tkdlqh2/aws_terraform.git
+        revision: main
+        directories:
+          - path: kubernetes/applications/overlays/staging/*
+
+  template:
+    metadata:
+      name: 'staging-{{path.basename}}'
+      namespace: argocd
+
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/tkdlqh2/aws_terraform.git
+        targetRevision: main
+        path: '{{path}}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: staging
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

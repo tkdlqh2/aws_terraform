@@ -131,58 +131,72 @@ aws eks update-kubeconfig --region ap-northeast-2 --name <cluster-name>
 kubectl get nodes
 ```
 
-### 2. 인프라 도구 설치
+### 2. ArgoCD 설치 (Bootstrap)
 
 ```bash
-# 네임스페이스 생성
-kubectl apply -f kubernetes/base/namespaces/
-
-# ArgoCD 설치
+# ArgoCD만 수동으로 설치 (Bootstrap)
 kubectl apply -k kubernetes/infrastructure/argocd/
 kubectl wait --for=condition=Available --timeout=300s deployment/argocd-server -n argocd
 
 # ArgoCD 초기 비밀번호 확인
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+echo
 
 # ArgoCD UI 접속 (포트 포워딩)
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 # 브라우저에서 https://localhost:8080 접속
-
-# Ingress NGINX 설치
-cd kubernetes/infrastructure/ingress-nginx
-bash install.sh
-
-# Cert-Manager 설치
-cd ../cert-manager
-bash install.sh
-
-# AWS Load Balancer Controller 설치
-cd ../aws-load-balancer-controller
-bash install.sh
-
-# 모니터링 스택 설치
-cd ../monitoring
-bash install.sh
+# Username: admin
+# Password: 위에서 확인한 비밀번호
 ```
 
 ### 3. GitOps 설정
 
 ```bash
-# GitHub 저장소에 코드 푸시
+# 1. GitHub 저장소에 코드 푸시
 git add .
-git commit -m "Initial commit"
+git commit -m "Initial infrastructure setup"
 git push origin main
 
-# ArgoCD Application 배포 (수동으로 한 번만)
-# 먼저 kubernetes/applications/argocd-apps/*.yaml 파일에서
-# GitHub 저장소 URL을 업데이트하세요
+# 2. ArgoCD Application 파일에서 GitHub 저장소 URL 업데이트
+# 다음 파일들을 편집하세요:
+# - kubernetes/applications/argocd-apps/app-of-apps.yaml
+# - kubernetes/applications/argocd-apps/infrastructure.yaml
+# 'YOUR-ORG/YOUR-REPO'를 실제 저장소로 변경
 
-# App of Apps 배포
+# 3. App of Apps 배포 (나머지는 자동으로 설치됨)
 kubectl apply -f kubernetes/applications/argocd-apps/app-of-apps.yaml
 
-# ArgoCD가 자동으로 모든 애플리케이션 동기화
+# 4. ArgoCD가 자동으로 모든 infrastructure 설치
+# - Namespaces
+# - Cert-Manager
+# - Ingress NGINX
+# - AWS Load Balancer Controller
+# - Monitoring (Prometheus + Grafana + Alertmanager)
+
+# 5. 설치 진행 상황 확인
+kubectl get applications -n argocd
 argocd app list
 argocd app get app-of-apps
+
+# 6. 모든 파드가 준비될 때까지 대기
+kubectl get pods -n cert-manager
+kubectl get pods -n ingress-nginx
+kubectl get pods -n kube-system | grep aws-load-balancer
+kubectl get pods -n monitoring
+```
+
+**중요 설정 변경 사항:**
+
+1. **AWS Load Balancer Controller** (`kubernetes/infrastructure/aws-load-balancer-controller/values.yaml`):
+   - `clusterName`: EKS 클러스터 이름으로 변경
+   - `serviceAccount.annotations.eks.amazonaws.com/role-arn`: Terraform output에서 가져온 IAM Role ARN으로 변경
+
+2. **Monitoring** (`kubernetes/infrastructure/monitoring/values.yaml`):
+   - Ingress 도메인 변경 (prometheus.example.com, grafana.example.com 등)
+   - Grafana admin 비밀번호 변경
+
+3. **Ingress NGINX** (`kubernetes/infrastructure/ingress-nginx/values.yaml`):
+   - 필요시 replica count나 리소스 조정
 ```
 
 ### 4. GitHub Actions 설정

@@ -1,0 +1,37 @@
+# Production Environment Applications
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prod-applications
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/tkdlqh2/aws_terraform.git
+        revision: main
+        directories:
+          - path: kubernetes/applications/overlays/prod/*
+
+  template:
+    metadata:
+      name: 'prod-{{path.basename}}'
+      namespace: argocd
+
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/tkdlqh2/aws_terraform.git
+        targetRevision: main
+        path: '{{path}}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: prod
+
+      syncPolicy:
+        automated:
+          prune: false  # Require manual approval for prod
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

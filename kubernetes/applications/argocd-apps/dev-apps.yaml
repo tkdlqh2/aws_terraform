@@ -1,0 +1,38 @@
+# Development Environment Applications
+# Add your dev applications here
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dev-applications
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/tkdlqh2/aws_terraform.git
+        revision: main
+        directories:
+          - path: kubernetes/applications/overlays/dev/*
+
+  template:
+    metadata:
+      name: 'dev-{{path.basename}}'
+      namespace: argocd
+
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/tkdlqh2/aws_terraform.git
+        targetRevision: main
+        path: '{{path}}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: dev
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
