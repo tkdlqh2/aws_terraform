@@ -14,11 +14,14 @@ resource "aws_eks_cluster" "main" {
 
   enabled_cluster_log_types = var.cluster_enabled_log_types
 
-  encryption_config {
-    provider {
-      key_arn = var.kms_key_arn != "" ? var.kms_key_arn : null
+  dynamic "encryption_config" {
+    for_each = var.kms_key_arn != "" ? [1] : []
+    content {
+      provider {
+        key_arn = var.kms_key_arn
+      }
+      resources = ["secrets"]
     }
-    resources = ["secrets"]
   }
 
   tags = var.default_tags
