@@ -18,8 +18,7 @@
 ### 인프라 도구 (클러스터 전역)
 - **ArgoCD**: GitOps CD 플랫폼
 - **Ingress NGINX**: Ingress Controller
-- **Cert-Manager**: 자동 SSL/TLS 인증서 관리
-- **AWS Load Balancer Controller**: ALB/NLB 통합
+- **Cert-Manager**: 자동 SSL/TLS 인증서 관리 (Let's Encrypt)
 - **Prometheus + Grafana**: 모니터링 및 메트릭
 - **Alertmanager**: 알림 관리
 
@@ -58,7 +57,6 @@ graph TB
                         ARGOCD[ArgoCD]
                         NGINX[Ingress NGINX]
                         CERT[Cert-Manager]
-                        AWSLB[AWS LB Controller]
                     end
 
                     subgraph "Monitoring Namespace"
@@ -93,7 +91,6 @@ graph TB
     NGINX --> PROD
 
     CERT -.->|SSL Certificates| NGINX
-    AWSLB -.->|Manages| ALB
     PROM -->|Metrics| NODE1 & NODE2 & NODE3
     PROM --> GRAF
     ALERT --> PROM
@@ -256,8 +253,7 @@ aws_terraform/
 │   │   ├── argocd/                         # ArgoCD 설치
 │   │   ├── monitoring/                     # Prometheus + Grafana
 │   │   ├── ingress-nginx/                  # Ingress Controller
-│   │   ├── cert-manager/                   # 인증서 관리
-│   │   └── aws-load-balancer-controller/   # AWS LB Controller
+│   │   └── cert-manager/                   # 인증서 관리 (Let's Encrypt)
 │   │
 │   └── applications/                       # 애플리케이션
 │       ├── argocd-apps/                    # ArgoCD Application 정의
@@ -378,35 +374,33 @@ kubectl apply -f kubernetes/applications/argocd-apps/app-of-apps.yaml
 # 4. ArgoCD가 자동으로 모든 infrastructure 설치
 # - Namespaces
 # - Cert-Manager
+# - ClusterIssuer (Let's Encrypt)
 # - Ingress NGINX
-# - AWS Load Balancer Controller
 # - Monitoring (Prometheus + Grafana + Alertmanager)
 
 # 5. 설치 진행 상황 확인
 kubectl get applications -n argocd
-argocd app list
-argocd app get app-of-apps
+argocd app list --grpc-web
+argocd app get app-of-apps --grpc-web
 
 # 6. 모든 파드가 준비될 때까지 대기
 kubectl get pods -n cert-manager
 kubectl get pods -n ingress-nginx
-kubectl get pods -n kube-system | grep aws-load-balancer
 kubectl get pods -n monitoring
+
+# 7. ClusterIssuer 확인
+kubectl get clusterissuer
 ```
 
 **중요 설정 변경 사항:**
 
-1. **AWS Load Balancer Controller** (`kubernetes/infrastructure/aws-load-balancer-controller/values.yaml`):
-   - `clusterName`: EKS 클러스터 이름으로 변경
-   - `serviceAccount.annotations.eks.amazonaws.com/role-arn`: Terraform output에서 가져온 IAM Role ARN으로 변경
-
-2. **Monitoring** (`kubernetes/infrastructure/monitoring/values.yaml`):
+1. **Monitoring** (`kubernetes/infrastructure/monitoring/values.yaml`):
    - Ingress 도메인 변경 (prometheus.example.com, grafana.example.com 등)
    - Grafana admin 비밀번호 변경
 
-3. **Ingress NGINX** (`kubernetes/infrastructure/ingress-nginx/values.yaml`):
+2. **Ingress NGINX** (`kubernetes/infrastructure/ingress-nginx/values.yaml`):
    - 필요시 replica count나 리소스 조정
-```
+
 
 ### 4. GitHub Actions 설정
 
@@ -418,22 +412,40 @@ GitHub 저장소 Settings > Secrets에 다음 시크릿 추가:
 - `ARGOCD_SERVER`: ArgoCD 서버 주소
 - `ARGOCD_TOKEN`: ArgoCD 인증 토큰
 
-### 5. DNS 설정 (Route 53)
+### 5. Load Balancer 정보
 
-**필수: 다음 도메인들을 ALB 주소로 연결해야 합니다.**
+이 프로젝트는 **ingress-nginx controller**와 **Classic Load Balancer (CLB)**를 사용합니다.
 
 ```bash
-# 1. ALB DNS 주소 확인
+# LoadBalancer Service 확인
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+
+# Classic Load Balancer DNS 확인
+kubectl get svc -n ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+**참고:**
+- ingress-nginx가 자동으로 Classic Load Balancer를 생성합니다
+- 대부분의 사용 사례에 충분합니다
+- ALB/NLB가 필요한 경우 AWS Load Balancer Controller를 별도로 설치할 수 있습니다
+
+### 6. DNS 설정 (Route 53)
+
+**필수: 다음 도메인들을 Load Balancer 주소로 연결해야 합니다.**
+
+```bash
+# 1. Load Balancer DNS 주소 확인
 kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
 # 예시 출력:
 # a1b2c3d4e5f6g7h8-1234567890.ap-northeast-2.elb.amazonaws.com
 
 # 2. Route 53에서 A 레코드 (Alias) 추가
-# - argocd.porcana.co.kr → ALB
-# - grafana.porcana.co.kr → ALB
-# - prometheus.porcana.co.kr → ALB
-# - alertmanager.porcana.co.kr → ALB
+# - argocd.porcana.co.kr → Load Balancer
+# - grafana.porcana.co.kr → Load Balancer
+# - prometheus.porcana.co.kr → Load Balancer
+# - alertmanager.porcana.co.kr → Load Balancer
 ```
 
 **Route 53 설정 (AWS Console):**
@@ -446,11 +458,14 @@ kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.
    - Alias: `Yes`
    - Route traffic to: `Alias to Application and Classic Load Balancer`
    - Region: `ap-northeast-2`
-   - Load Balancer: 위에서 확인한 ALB 선택
+   - Load Balancer: 위에서 확인한 Load Balancer 선택
 
 **SSL 인증서 확인:**
 
 ```bash
+# ClusterIssuer 확인
+kubectl get clusterissuer
+
 # Cert-Manager가 자동으로 Let's Encrypt 인증서를 발급합니다
 kubectl get certificate -A
 
@@ -571,17 +586,19 @@ kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-alertmanager 9
 
 ### ArgoCD
 ```bash
+# Note: Ingress를 통해 ArgoCD에 접근할 때는 --grpc-web 플래그 필요
+
 # 애플리케이션 목록
-argocd app list
+argocd app list --grpc-web
 
 # 애플리케이션 상태 확인
-argocd app get <app-name>
+argocd app get <app-name> --grpc-web
 
 # 수동 동기화
-argocd app sync <app-name>
+argocd app sync <app-name> --grpc-web
 
 # 롤백
-argocd app rollback <app-name>
+argocd app rollback <app-name> --grpc-web
 ```
 
 ### Terraform
@@ -608,35 +625,6 @@ kubectl logs -n <namespace> <pod-name>
 
 # Pod 접속
 kubectl exec -it -n <namespace> <pod-name> -- /bin/sh
-```
-
-## 문제 해결
-
-### ArgoCD 애플리케이션이 동기화되지 않음
-```bash
-# ArgoCD 로그 확인
-kubectl logs -n argocd deployment/argocd-application-controller
-
-# 수동 동기화 시도
-argocd app sync <app-name> --force
-```
-
-### Ingress가 작동하지 않음
-```bash
-# Ingress Controller 로그 확인
-kubectl logs -n ingress-nginx deployment/ingress-nginx-controller
-
-# LoadBalancer 서비스 확인
-kubectl get svc -n ingress-nginx
-```
-
-### 모니터링 데이터가 보이지 않음
-```bash
-# Prometheus targets 확인
-# http://localhost:9090/targets
-
-# ServiceMonitor 확인
-kubectl get servicemonitor -A
 ```
 
 ## 보안 고려사항
@@ -671,9 +659,3 @@ kubectl get servicemonitor -A
 ## 라이선스
 
 MIT License
-
-## 참고 문서
-
-- [상세 설정 가이드](docs/SETUP.md)
-- [ArgoCD 사용 가이드](docs/ARGOCD.md)
-- [모니터링 가이드](docs/MONITORING.md)
