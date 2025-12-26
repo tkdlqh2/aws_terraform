@@ -24,7 +24,12 @@ resource "aws_eks_cluster" "main" {
     }
   }
 
-  tags = var.default_tags
+  tags = merge(
+    var.default_tags,
+    {
+      TestTag = "terraform-workflow-test"
+    }
+  )
 
   depends_on = [
     aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy,
