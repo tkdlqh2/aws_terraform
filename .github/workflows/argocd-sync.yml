@@ -46,26 +46,26 @@ jobs:
         run: |
           ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER }}"
           ARGOCD_TOKEN="${{ secrets.ARGOCD_TOKEN }}"
-          argocd login $ARGOCD_SERVER --auth-token $ARGOCD_TOKEN --insecure
+          argocd login $ARGOCD_SERVER --auth-token $ARGOCD_TOKEN --insecure --grpc-web
 
       - name: Sync specific application
         if: github.event.inputs.app_name != ''
         run: |
-          argocd app sync ${{ github.event.inputs.app_name }} --force
+          argocd app sync ${{ github.event.inputs.app_name }} --force --grpc-web
 
       - name: Sync all applications
         if: github.event.inputs.app_name == ''
         run: |
           # Sync infrastructure apps first
-          argocd app sync -l app.kubernetes.io/component=infrastructure --force
+          argocd app sync -l app.kubernetes.io/component=infrastructure --force --grpc-web
 
           # Wait for infrastructure to be healthy
-          argocd app wait -l app.kubernetes.io/component=infrastructure --health
+          argocd app wait -l app.kubernetes.io/component=infrastructure --health --grpc-web
 
           # Sync application apps
-          argocd app sync -l app.kubernetes.io/component=application --force
+          argocd app sync -l app.kubernetes.io/component=application --force --grpc-web
 
       - name: Check application health
         run: |
-          argocd app list
-          argocd app wait --all --health --timeout 300
+          argocd app list --grpc-web
+          argocd app wait --all --health --timeout 300 --grpc-web
