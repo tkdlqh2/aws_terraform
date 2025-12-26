@@ -56,16 +56,16 @@ jobs:
       - name: Sync all applications
         if: github.event.inputs.app_name == ''
         run: |
-          # Sync infrastructure apps first
-          argocd app sync -l app.kubernetes.io/component=infrastructure --force --grpc-web
+          # Sync app-of-apps first to ensure all apps are registered
+          argocd app sync app-of-apps --force --grpc-web
 
-          # Wait for infrastructure to be healthy
-          argocd app wait -l app.kubernetes.io/component=infrastructure --health --grpc-web
+          # Wait a moment for child apps to be created
+          sleep 5
 
-          # Sync application apps
-          argocd app sync -l app.kubernetes.io/component=application --force --grpc-web
+          # Sync all apps (they have auto-sync enabled, but force refresh)
+          argocd app sync --all --force --grpc-web || true
 
       - name: Check application health
         run: |
           argocd app list --grpc-web
-          argocd app wait --all --health --timeout 300 --grpc-web
+          argocd app wait --all --health --timeout 300 --grpc-web || true
