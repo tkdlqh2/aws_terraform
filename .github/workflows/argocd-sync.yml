@@ -46,7 +46,7 @@ jobs:
         run: |
           ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER }}"
           ARGOCD_TOKEN="${{ secrets.ARGOCD_TOKEN }}"
-          argocd login $ARGOCD_SERVER --auth-token $ARGOCD_TOKEN --insecure --grpc-web
+          argocd login $ARGOCD_SERVER --username admin --password $ARGOCD_TOKEN --insecure --grpc-web
 
       - name: Sync specific application
         if: github.event.inputs.app_name != ''
