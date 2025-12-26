@@ -6,7 +6,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    kubernetes.io/ingress.description: "ArgoCD GitOps CD Platform"
+    kubernetes.io/ingress.description: "ArgoCD GitOps CD Platform "
 spec:
   ingressClassName: nginx
   rules:
