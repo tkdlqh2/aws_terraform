@@ -34,3 +34,8 @@ terraform.rc
 
 # Lock file (optional - some teams commit this)
 # .terraform.lock.hcl
+
+# Kubernetes Secrets (sensitive data)
+*-secret.yaml
+!*-secret.yaml.example
+kubernetes/infrastructure/monitoring/grafana-secret.yaml

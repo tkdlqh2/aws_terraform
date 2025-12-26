@@ -27,6 +27,212 @@
 - **GitHub Actions**: Terraform 관리 및 ArgoCD 동기화
 - **자동화된 검증**: Manifest 검증, Terraform plan
 
+## 아키텍처
+
+### 전체 인프라 구조
+
+```mermaid
+graph TB
+    subgraph "AWS Cloud - ap-northeast-2"
+        subgraph "VPC 10.0.0.0/16"
+            subgraph "Public Subnets"
+                NAT1[NAT Gateway AZ-a]
+                NAT2[NAT Gateway AZ-b]
+                NAT3[NAT Gateway AZ-c]
+                ALB[Application Load Balancer]
+            end
+
+            subgraph "Private Subnets"
+                subgraph "EKS Cluster"
+                    subgraph "Control Plane"
+                        API[Kubernetes API Server]
+                    end
+
+                    subgraph "Node Group - Multi-AZ"
+                        NODE1[Worker Node 1]
+                        NODE2[Worker Node 2]
+                        NODE3[Worker Node N]
+                    end
+
+                    subgraph "Infrastructure Namespace"
+                        ARGOCD[ArgoCD]
+                        NGINX[Ingress NGINX]
+                        CERT[Cert-Manager]
+                        AWSLB[AWS LB Controller]
+                    end
+
+                    subgraph "Monitoring Namespace"
+                        PROM[Prometheus]
+                        GRAF[Grafana]
+                        ALERT[Alertmanager]
+                    end
+
+                    subgraph "Application Namespaces"
+                        DEV[Dev Apps]
+                        STAGING[Staging Apps]
+                        PROD[Prod Apps]
+                    end
+                end
+            end
+        end
+
+        S3[(S3 Bucket<br/>Terraform State)]
+        ECR[(ECR<br/>Container Registry)]
+        SECRETS[(Secrets Manager)]
+        R53[Route 53<br/>porcana.co.kr]
+    end
+
+    USER[Users] --> R53
+    R53 --> ALB
+    ALB --> NGINX
+    NGINX --> ARGOCD
+    NGINX --> GRAF
+    NGINX --> PROM
+    NGINX --> DEV
+    NGINX --> STAGING
+    NGINX --> PROD
+
+    CERT -.->|SSL Certificates| NGINX
+    AWSLB -.->|Manages| ALB
+    PROM -->|Metrics| NODE1 & NODE2 & NODE3
+    PROM --> GRAF
+    ALERT --> PROM
+
+    NAT1 & NAT2 & NAT3 -.->|Internet Access| NODE1 & NODE2 & NODE3
+
+    style EKS Cluster fill:#e1f5ff
+    style Infrastructure Namespace fill:#fff4e6
+    style Monitoring Namespace fill:#e8f5e9
+    style Application Namespaces fill:#f3e5f5
+```
+
+### GitOps 워크플로우
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub Repository
+    participant GHA as GitHub Actions
+    participant TF as Terraform
+    participant AWS as AWS EKS
+    participant ArgoCD as ArgoCD
+    participant K8s as Kubernetes
+
+    Dev->>GH: 1. Git Push (Infrastructure Code)
+    GH->>GHA: 2. Trigger Workflow
+
+    alt Terraform Changes
+        GHA->>TF: 3. terraform plan/apply
+        TF->>AWS: 4. Provision/Update Infrastructure
+    end
+
+    alt Kubernetes Manifest Changes
+        GHA->>ArgoCD: 5. Trigger Sync (Optional)
+        ArgoCD->>GH: 6. Pull Latest Manifests
+        ArgoCD->>K8s: 7. Apply Changes
+        K8s-->>ArgoCD: 8. Report Status
+    end
+
+    Note over ArgoCD,K8s: Auto-sync enabled<br/>Self-heal enabled<br/>Prune enabled
+
+    ArgoCD->>GH: 9. Monitor for Changes (Poll)
+    ArgoCD->>K8s: 10. Auto-sync if drift detected
+```
+
+### 모니터링 아키텍처
+
+```mermaid
+graph LR
+    subgraph "Kubernetes Cluster"
+        subgraph "Application Pods"
+            APP1[App Pod 1]
+            APP2[App Pod 2]
+            APP3[App Pod N]
+        end
+
+        subgraph "System Components"
+            KUBELET[Kubelet]
+            APISERVER[API Server]
+            CONTROLLER[Controller Manager]
+        end
+
+        subgraph "Monitoring Stack"
+            NE[Node Exporter<br/>DaemonSet]
+            KSM[Kube State Metrics]
+            PROM[Prometheus<br/>2 Replicas]
+            ALERT[Alertmanager<br/>2 Replicas]
+            GRAF[Grafana]
+        end
+    end
+
+    subgraph "External Services"
+        SMTP[Email/Slack<br/>Notifications]
+    end
+
+    subgraph "Users"
+        DEV[Developers]
+        OPS[Operations]
+    end
+
+    APP1 & APP2 & APP3 -.->|Metrics Endpoint| PROM
+    KUBELET & APISERVER & CONTROLLER -.->|Metrics| PROM
+    NE -.->|Node Metrics| PROM
+    KSM -.->|K8s Resource Metrics| PROM
+
+    PROM -->|Alert Rules| ALERT
+    PROM -->|Data Source| GRAF
+    ALERT -->|Notifications| SMTP
+
+    DEV & OPS -->|View Dashboards| GRAF
+    DEV & OPS -->|Query Metrics| PROM
+
+    style Monitoring Stack fill:#e8f5e9
+    style External Services fill:#fff4e6
+```
+
+### 네트워크 플로우
+
+```mermaid
+graph TB
+    subgraph "Internet"
+        CLIENT[Client]
+    end
+
+    subgraph "AWS VPC"
+        IGW[Internet Gateway]
+
+        subgraph "Public Subnet"
+            NGW[NAT Gateway]
+            ALB[Application Load Balancer]
+        end
+
+        subgraph "Private Subnet"
+            subgraph "EKS Nodes"
+                ING[Ingress NGINX<br/>NodePort/LoadBalancer]
+
+                subgraph "Pods"
+                    ARGOCD_POD[ArgoCD Pods]
+                    GRAFANA_POD[Grafana Pods]
+                    APP_POD[Application Pods]
+                end
+            end
+        end
+    end
+
+    CLIENT -->|HTTPS| IGW
+    IGW --> ALB
+    ALB -->|Target Group| ING
+    ING -->|argocd.porcana.co.kr| ARGOCD_POD
+    ING -->|grafana.porcana.co.kr| GRAFANA_POD
+    ING -->|prometheus.porcana.co.kr| APP_POD
+
+    ARGOCD_POD & GRAFANA_POD & APP_POD -.->|Outbound Internet| NGW
+    NGW -.-> IGW
+
+    style Public Subnet fill:#fff4e6
+    style Private Subnet fill:#e1f5ff
+```
+
 ## 프로젝트 구조
 
 ```
@@ -142,9 +348,12 @@ kubectl wait --for=condition=Available --timeout=300s deployment/argocd-server -
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 echo
 
-# ArgoCD UI 접속 (포트 포워딩)
+# ArgoCD UI 접속 방법 1: 포트 포워딩 (로컬 테스트)
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 # 브라우저에서 https://localhost:8080 접속
+
+# ArgoCD UI 접속 방법 2: Ingress를 통한 접속 (프로덕션)
+# Ingress가 배포된 후 https://argocd.porcana.co.kr 접속
 # Username: admin
 # Password: 위에서 확인한 비밀번호
 ```
@@ -209,6 +418,65 @@ GitHub 저장소 Settings > Secrets에 다음 시크릿 추가:
 - `ARGOCD_SERVER`: ArgoCD 서버 주소
 - `ARGOCD_TOKEN`: ArgoCD 인증 토큰
 
+### 5. DNS 설정 (Route 53)
+
+**필수: 다음 도메인들을 ALB 주소로 연결해야 합니다.**
+
+```bash
+# 1. ALB DNS 주소 확인
+kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+# 예시 출력:
+# a1b2c3d4e5f6g7h8-1234567890.ap-northeast-2.elb.amazonaws.com
+
+# 2. Route 53에서 A 레코드 (Alias) 추가
+# - argocd.porcana.co.kr → ALB
+# - grafana.porcana.co.kr → ALB
+# - prometheus.porcana.co.kr → ALB
+# - alertmanager.porcana.co.kr → ALB
+```
+
+**Route 53 설정 (AWS Console):**
+
+1. Route 53 > Hosted Zones > `porcana.co.kr` 선택
+2. "Create record" 클릭
+3. 각 서브도메인에 대해:
+   - Record name: `argocd`, `grafana`, `prometheus`, `alertmanager`
+   - Record type: `A`
+   - Alias: `Yes`
+   - Route traffic to: `Alias to Application and Classic Load Balancer`
+   - Region: `ap-northeast-2`
+   - Load Balancer: 위에서 확인한 ALB 선택
+
+**SSL 인증서 확인:**
+
+```bash
+# Cert-Manager가 자동으로 Let's Encrypt 인증서를 발급합니다
+kubectl get certificate -A
+
+# 인증서가 Ready 상태인지 확인
+kubectl describe certificate -n argocd argocd-server-tls
+kubectl describe certificate -n monitoring grafana-tls
+kubectl describe certificate -n monitoring prometheus-tls
+kubectl describe certificate -n monitoring alertmanager-tls
+```
+
+**접속 확인:**
+
+```bash
+# 도메인으로 접속 테스트
+curl -I https://argocd.porcana.co.kr
+curl -I https://grafana.porcana.co.kr
+curl -I https://prometheus.porcana.co.kr
+curl -I https://alertmanager.porcana.co.kr
+
+# 브라우저에서 접속
+# - https://argocd.porcana.co.kr
+# - https://grafana.porcana.co.kr
+# - https://prometheus.porcana.co.kr
+# - https://alertmanager.porcana.co.kr
+```
+
 ## 환경별 배포
 
 ### Dev 환경
@@ -232,14 +500,59 @@ GitHub 저장소 Settings > Secrets에 다음 시크릿 추가:
 
 ## 모니터링
 
+### Grafana 관리자 비밀번호 설정
+
+**방법 1: Kubernetes Secret 사용 (권장)**
+
+```bash
+# 1. Secret 생성
+kubectl create secret generic grafana-admin-password \
+  -n monitoring \
+  --from-literal=admin-user=admin \
+  --from-literal=admin-password=YOUR_SECURE_PASSWORD
+
+# 2. values.yaml에서 existingSecret 설정이 되어있는지 확인
+# grafana.admin.existingSecret: "grafana-admin-password"
+
+# 3. ArgoCD로 배포하면 자동으로 Secret 참조
+```
+
+**방법 2: Secret 매니페스트 파일 사용**
+
+```bash
+# 1. Example 파일 복사
+cp kubernetes/infrastructure/monitoring/grafana-secret.yaml.example \
+   kubernetes/infrastructure/monitoring/grafana-secret.yaml
+
+# 2. 비밀번호를 Base64로 인코딩
+echo -n "YOUR_SECURE_PASSWORD" | base64
+
+# 3. grafana-secret.yaml 파일에서 admin-password 값 변경
+
+# 4. Secret 생성
+kubectl apply -f kubernetes/infrastructure/monitoring/grafana-secret.yaml
+
+# Note: grafana-secret.yaml은 .gitignore에 포함되어 Git에 커밋되지 않습니다
+```
+
+**방법 3: 직접 비밀번호 설정 (간단하지만 덜 안전)**
+
+```bash
+# values.yaml에서 adminPassword 직접 설정 (existingSecret 주석 처리)
+# grafana:
+#   adminPassword: "YOUR_SECURE_PASSWORD"
+```
+
 ### Grafana 접속
 ```bash
-# 포트 포워딩
+# 방법 1: 포트 포워딩 (로컬 테스트)
 kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
-
 # 브라우저에서 http://localhost:3000 접속
+
+# 방법 2: Ingress를 통한 접속 (프로덕션)
+# https://grafana.porcana.co.kr
 # Username: admin
-# Password: values.yaml에서 설정한 비밀번호
+# Password: Secret에 설정한 비밀번호
 ```
 
 ### Prometheus 접속
