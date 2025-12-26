@@ -13,8 +13,8 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 
-# Exclude backend configuration files (contains bucket names)
-backend.hcl
+# Backend configuration is committed (bucket names are not sensitive)
+# backend.hcl
 
 # Ignore override files as they are usually used to override resources locally
 override.tf
