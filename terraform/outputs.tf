@@ -103,6 +103,11 @@ output "aws_load_balancer_controller_iam_role_arn" {
   value       = aws_iam_role.aws_load_balancer_controller.arn
 }
 
+output "cluster_autoscaler_iam_role_arn" {
+  description = "IAM role ARN for Cluster Autoscaler"
+  value       = aws_iam_role.cluster_autoscaler.arn
+}
+
 # Configuration Output
 output "configure_kubectl" {
   description = "Command to configure kubectl"

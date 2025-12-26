@@ -1,0 +1,30 @@
+autoDiscovery:
+  clusterName: my-eks-cluster
+  enabled: true
+
+awsRegion: ap-northeast-2
+
+rbac:
+  create: true
+  serviceAccount:
+    create: true
+    name: cluster-autoscaler
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::654654460284:role/my-eks-cluster-cluster-autoscaler"
+
+extraArgs:
+  balance-similar-node-groups: true
+  skip-nodes-with-system-pods: false
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 300Mi
+  requests:
+    cpu: 100m
+    memory: 300Mi
+
+priorityClassName: system-cluster-critical
+
+nodeSelector:
+  kubernetes.io/os: linux
